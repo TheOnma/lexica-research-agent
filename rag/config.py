@@ -5,12 +5,16 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     # API keys
-    openai_api_key: str
+    openai_api_key: str          # used for embeddings (Anthropic has no embeddings endpoint)
+    anthropic_api_key: str       # used for generation / synthesis / agent reasoning
+    s2_api_key: str = ""         # optional Semantic Scholar key for higher rate limits
 
-    # LLM
-    llm_model: str = "gpt-4o"
+    # LLM (Claude via Anthropic SDK)
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-sonnet-4-6"   # answer generation + literature synthesis
+    fast_model: str = "claude-haiku-4-5"   # cheap/fast steps (HyDE)
 
-    # Embeddings
+    # Embeddings (OpenAI)
     embedding_model: str = "text-embedding-3-small"
 
     # Vector store
