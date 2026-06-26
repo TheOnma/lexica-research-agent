@@ -5,6 +5,7 @@ chunk -> embed -> store path so discovered papers become answerable via /ask.
 """
 
 import logging
+import re
 
 from rag.config import settings
 from rag.ingestion.chunker import chunk_pages
@@ -23,6 +24,18 @@ provided. Cite claims with bracketed numbers like [1] or [2, 3] that refer to th
 papers. CRITICAL: never cite a number that is not in the provided list, and never \
 invent papers, authors, findings, or results. If the papers don't cover something, \
 say so rather than guessing. Group related work and highlight trends and disagreements."""
+
+
+_CITATION_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+
+
+def cited_indices(summary: str) -> set[int]:
+    """Extract the reference numbers cited in a summary (handles [1] and [2, 3])."""
+    indices: set[int] = set()
+    for match in _CITATION_RE.finditer(summary):
+        for num in match.group(1).split(","):
+            indices.add(int(num.strip()))
+    return indices
 
 
 def discover(topic: str, limit: int = 10) -> dict:
