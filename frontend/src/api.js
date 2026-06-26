@@ -31,3 +31,27 @@ export async function askQuestion(question) {
   if (!res.ok) throw new Error(data.detail || 'Request failed')
   return data
 }
+
+async function postJSON(path, body) {
+  const res = await fetch(`${API}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || 'Request failed')
+  return data
+}
+
+export async function discoverPapers(topic) {
+  const data = await postJSON('/research/discover', { topic })
+  return data.papers
+}
+
+export async function summarizeWork(topic, papers) {
+  return postJSON('/research/summarize', { topic, papers })
+}
+
+export async function ingestPaper(paper) {
+  return postJSON('/research/ingest', { paper })
+}

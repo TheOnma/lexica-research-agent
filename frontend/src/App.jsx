@@ -3,6 +3,7 @@ import { listDocuments, deleteDocument, ingestPDF, askQuestion } from './api.js'
 import Sidebar from './components/Sidebar.jsx'
 import Chat from './components/Chat.jsx'
 import InputBar from './components/InputBar.jsx'
+import ResearchPanel from './components/ResearchPanel.jsx'
 
 export default function App() {
   const [documents, setDocuments] = useState([])
@@ -10,6 +11,7 @@ export default function App() {
     { role: 'ai', text: 'Hello! Upload a PDF and ask me anything about it.', sources: [], contextFound: true }
   ])
   const [loading, setLoading] = useState(false)
+  const [tab, setTab] = useState('library') // 'library' | 'research'
 
   useEffect(() => {
     refreshDocuments()
@@ -65,8 +67,21 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       {/* Header */}
-      <header className="bg-red-600 text-white px-6 h-14 flex items-center justify-center flex-shrink-0">
-        <h1 className="font-semibold text-base tracking-tight">Ask Your Documents</h1>
+      <header className="bg-red-600 text-white px-6 h-14 flex items-center justify-center flex-shrink-0 relative">
+        <h1 className="font-semibold text-base tracking-tight">Research Agent</h1>
+        <nav className="absolute right-6 flex gap-1 text-xs">
+          {[['library', 'Library Q&A'], ['research', 'Research']].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`px-3 py-1 rounded-full transition ${
+                tab === id ? 'bg-white text-red-600 font-medium' : 'text-white/80 hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
       </header>
 
       {/* Body */}
@@ -79,10 +94,16 @@ export default function App() {
           <Sidebar documents={documents} onUpload={handleUpload} onDelete={handleDelete} />
         </aside>
 
-        {/* Main chat column */}
+        {/* Main column */}
         <main className="flex-1 flex flex-col overflow-hidden bg-gray-50">
-          <Chat messages={messages} loading={loading} />
-          <InputBar onAsk={handleAsk} loading={loading} />
+          {tab === 'library' ? (
+            <>
+              <Chat messages={messages} loading={loading} />
+              <InputBar onAsk={handleAsk} loading={loading} />
+            </>
+          ) : (
+            <ResearchPanel onLibraryChange={refreshDocuments} />
+          )}
         </main>
       </div>
 
