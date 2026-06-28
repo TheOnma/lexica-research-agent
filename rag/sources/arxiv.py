@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 import arxiv
+import httpx
 
 from rag.sources.base import Paper
 
@@ -48,14 +49,22 @@ def search_arxiv(query: str, max_results: int = 10) -> list[Paper]:
 def download_pdf(paper: Paper) -> Path:
     """Download a paper's PDF to a temp file and return the path.
 
-    Raises ValueError if the paper has no PDF url.
+    Fetches the PDF directly over HTTP rather than via the arxiv package, whose
+    download API changed across versions (Result.download_pdf was removed in 4.0).
+
+    Raises ValueError if no PDF url can be resolved.
     """
-    if not paper.pdf_url:
-        raise ValueError(f"Paper {paper.id} has no PDF url")
     arxiv_id = paper.external_ids.get("ArXiv") or paper.id
-    result = next(_client.results(arxiv.Search(id_list=[arxiv_id])))
+    pdf_url = paper.pdf_url or (f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else None)
+    if not pdf_url:
+        raise ValueError(f"Paper {paper.id} has no PDF url")
+
     tmp_dir = Path(tempfile.mkdtemp(prefix="arxiv_"))
-    filename = f"{arxiv_id.replace('/', '_')}.pdf"
-    path = Path(result.download_pdf(dirpath=str(tmp_dir), filename=filename))
+    path = tmp_dir / f"{arxiv_id.replace('/', '_')}.pdf"
+    with httpx.stream("GET", pdf_url, follow_redirects=True, timeout=60.0) as resp:
+        resp.raise_for_status()
+        with open(path, "wb") as f:
+            for chunk in resp.iter_bytes():
+                f.write(chunk)
     logger.info("Downloaded %s -> %s", arxiv_id, path)
     return path
