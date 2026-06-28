@@ -8,15 +8,18 @@ function authorLabel(authors) {
 
 function PaperCard({ paper, onAdded }) {
   const [status, setStatus] = useState(null) // null | 'adding' | 'added' | 'error'
+  const [errorMsg, setErrorMsg] = useState(null)
 
   async function add() {
     setStatus('adding')
+    setErrorMsg(null)
     try {
       await ingestPaper(paper)
       setStatus('added')
       onAdded?.()
-    } catch {
+    } catch (err) {
       setStatus('error')
+      setErrorMsg(err.message)
     }
   }
 
@@ -43,7 +46,11 @@ function PaperCard({ paper, onAdded }) {
       {paper.abstract && (
         <p className="text-[0.8rem] text-gray-600 mt-2 line-clamp-3">{paper.abstract}</p>
       )}
-      {status === 'error' && <p className="text-xs text-red-500 mt-1">Could not add to library.</p>}
+      {status === 'error' && (
+        <p className="text-xs text-red-500 mt-1">
+          Could not add to library{errorMsg ? `: ${errorMsg}` : '.'}
+        </p>
+      )}
     </div>
   )
 }
