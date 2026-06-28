@@ -9,7 +9,9 @@ from pydantic import BaseModel
 
 from rag.ingestion.loader import SUPPORTED_EXTENSIONS
 from rag.pipelines.rag import answer, ingest_document
+from rag.pipelines.research import discover, ingest_paper, summarize_recent_work
 from rag.retrieval.retriever import collection_count, delete_source, list_sources
+from rag.sources.base import Paper
 
 logger = logging.getLogger(__name__)
 
@@ -102,3 +104,53 @@ def ask(request: QuestionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     return result
+
+
+# --- Research endpoints ---
+
+class DiscoverRequest(BaseModel):
+    topic: str
+    limit: int = 10
+
+
+class SummarizeRequest(BaseModel):
+    topic: str
+    papers: list[dict]  # the paper dicts returned by /research/discover
+
+
+class IngestPaperRequest(BaseModel):
+    paper: dict  # a single paper dict returned by /research/discover
+
+
+@app.post("/research/discover")
+def research_discover(request: DiscoverRequest):
+    """Find recent, relevant papers for a research topic (arXiv + Semantic Scholar)."""
+    if not request.topic.strip():
+        raise HTTPException(status_code=400, detail="Topic cannot be empty")
+    try:
+        return discover(request.topic, limit=request.limit)
+    except Exception as e:
+        logger.error("Discovery failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/research/summarize")
+def research_summarize(request: SummarizeRequest):
+    """Summarize recent work, citing only the supplied papers."""
+    try:
+        papers = [Paper(**p) for p in request.papers]
+        return summarize_recent_work(request.topic, papers)
+    except Exception as e:
+        logger.error("Summarization failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/research/ingest")
+def research_ingest(request: IngestPaperRequest):
+    """Pull a discovered paper into the library so /ask can use it."""
+    try:
+        paper = Paper(**request.paper)
+        return ingest_paper(paper)
+    except Exception as e:
+        logger.error("Paper ingestion failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
