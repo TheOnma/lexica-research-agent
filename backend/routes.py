@@ -15,7 +15,7 @@ from rag.sources.base import Paper
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Document Q&A", description="RAG-powered document question answering")
+app = FastAPI(title="Research Agent", description="RAG-powered research agent.")
 
 app.add_middleware(
     CORSMiddleware,
