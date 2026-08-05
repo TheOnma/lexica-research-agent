@@ -14,3 +14,4 @@ python-dotenv>=1.0.0
 tiktoken>=0.6.0
 pytest>=8.0.0
 fpdf2>=2.7.0
+langsmith>=0.1.0
