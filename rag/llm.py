@@ -9,6 +9,7 @@ because Anthropic has no embeddings endpoint.
 import logging
 
 from anthropic import Anthropic
+from langsmith import traceable
 
 from rag.config import settings
 
@@ -24,6 +25,7 @@ def _get_client() -> Anthropic:
     return _client
 
 
+@traceable
 def complete(
     prompt: str,
     *,

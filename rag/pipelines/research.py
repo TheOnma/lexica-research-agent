@@ -15,6 +15,7 @@ from rag.llm import complete
 from rag.retrieval.retriever import add_chunks
 from rag.sources import arxiv, find_papers
 from rag.sources.base import Paper
+from langsmith import traceable
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def _author_label(authors: list[str]) -> str:
     return authors[0] + (" et al." if len(authors) > 1 else "")
 
 
+@traceable
 def summarize_recent_work(topic: str, papers: list[Paper]) -> dict:
     """Synthesize a grounded 'recent work' summary citing only the given papers.
 
@@ -88,6 +90,7 @@ def _paper_label(paper: Paper) -> str:
     return f"{paper.title}{year}"
 
 
+@traceable
 def ingest_paper(paper: Paper) -> dict:
     """Pull a paper's full text (arXiv PDF) or abstract into the ChromaDB library."""
     if paper.external_ids.get("ArXiv"):

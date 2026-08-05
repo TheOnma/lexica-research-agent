@@ -9,6 +9,7 @@ from rag.ingestion.embedder import embed_chunks, embed_texts
 from rag.ingestion.loader import load_document, load_documents_from_dir, load_pdf, load_pdfs_from_dir
 from rag.llm import complete
 from rag.retrieval.retriever import add_chunks, retrieve
+from langsmith import traceable
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ def _generate_hypothetical_answer(question: str) -> str:
     return hypothetical
 
 
+@traceable
 def ingest_document(path: str | Path) -> int:
     """
     Load, chunk, embed, and store a single document (PDF, DOCX, or TXT).
@@ -77,6 +79,7 @@ def ingest_directory(directory: str | Path) -> int:
     return len(chunks)
 
 
+@traceable
 def answer(question: str) -> dict:
     """
     Answer a question using retrieved document context.
