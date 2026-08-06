@@ -8,6 +8,7 @@ because Anthropic has no embeddings endpoint.
 
 import logging
 
+from typing import Iterator
 from anthropic import Anthropic
 from langsmith import traceable
 
@@ -54,3 +55,25 @@ def complete(
         messages=[{"role": "user", "content": prompt}],
     )
     return next((block.text for block in response.content if block.type == "text"), "")
+
+@traceable
+def complete_stream(
+    prompt: str,
+    *,
+    system: str | None = None,
+    model: str | None = None,
+    max_tokens: int = 1024,
+) -> Iterator[str]:
+    """
+    Generate a streaming completion for a single user prompt.
+    Yields chunks of text as they arrive from the model.
+    """
+    client = _get_client()
+    with client.messages.stream(
+        model=model or settings.llm_model,
+        max_tokens=max_tokens,
+        system=system or "",
+        messages=[{"role": "user", "content": prompt}],
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
