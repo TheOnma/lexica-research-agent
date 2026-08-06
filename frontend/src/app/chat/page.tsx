@@ -20,10 +20,12 @@ interface Message {
   loading?: boolean;
 }
 
-const HISTORY = [
-  { id: 'h1', t: 'Transformer self-attention key innovations', d: 'Today · 2:14 PM', active: true },
-  { id: 'h2', t: 'Climate report — Arctic sea ice trajectory', d: 'Today · 11:03 AM' },
-];
+interface ChatSession {
+  id: string;
+  title: string;
+  date: string;
+  messages: Message[];
+}
 
 const SUGGESTED = [
   "Summarise the key findings",
@@ -39,6 +41,8 @@ export default function ChatPage() {
   
   const [documents, setDocuments] = useState<Document[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -48,6 +52,12 @@ export default function ChatPage() {
 
   useEffect(() => {
     loadDocuments();
+    const saved = localStorage.getItem('lexica_sessions');
+    if (saved) {
+      try {
+        setSessions(JSON.parse(saved));
+      } catch(e) {}
+    }
   }, []);
 
   useEffect(() => {
@@ -89,10 +99,26 @@ export default function ChatPage() {
     
     const question = draft;
     setDraft('');
-    setMessages(prev => [...prev, { role: 'user', text: question }]);
+    
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      sessionId = Date.now().toString();
+      setActiveSessionId(sessionId);
+    }
+    const currentSessionId = sessionId;
+
+    setMessages(prev => {
+      const newMsgs = [...prev, { role: 'user', text: question } as Message];
+      saveSession(currentSessionId, newMsgs, question);
+      return newMsgs;
+    });
     
     // placeholder for bot
-    setMessages(prev => [...prev, { role: 'bot', text: '', tools: [], loading: true }]);
+    setMessages(prev => {
+      const newMsgs = [...prev, { role: 'bot', text: '', tools: [], loading: true } as Message];
+      saveSession(currentSessionId, newMsgs, question);
+      return newMsgs;
+    });
     setIsStreaming(true);
 
     const abortController = new AbortController();
@@ -145,6 +171,7 @@ export default function ChatPage() {
           const last = newMsgs[newMsgs.length - 1];
           last.text = currentText;
           last.loading = false;
+          saveSession(currentSessionId, newMsgs, question);
           return newMsgs;
         });
       },
@@ -154,6 +181,7 @@ export default function ChatPage() {
           const last = newMsgs[newMsgs.length - 1];
           last.text = currentText + `\n\n[Error: ${err}]`;
           last.loading = false;
+          saveSession(currentSessionId, newMsgs, question);
           return newMsgs;
         });
       },
@@ -162,6 +190,38 @@ export default function ChatPage() {
     
     abortControllerRef.current = null;
     setIsStreaming(false);
+  }
+
+  function saveSession(id: string, msgs: Message[], firstQuestion: string) {
+    const title = msgs.length > 0 && msgs[0].role === 'user' ? msgs[0].text.substring(0, 40) + "..." : firstQuestion.substring(0, 40) + "...";
+    const dateStr = new Date().toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+    
+    setSessions(prev => {
+      const existing = prev.find(s => s.id === id);
+      let updated;
+      if (existing) {
+        updated = prev.map(s => s.id === id ? { ...s, messages: msgs } : s);
+      } else {
+        updated = [{ id, title, date: `Today · ${dateStr}`, messages: msgs }, ...prev];
+      }
+      localStorage.setItem('lexica_sessions', JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  function loadSession(id: string) {
+    if (isStreaming) return;
+    const s = sessions.find(x => x.id === id);
+    if (s) {
+      setActiveSessionId(id);
+      setMessages(s.messages);
+    }
+  }
+
+  function newChat() {
+    if (isStreaming) return;
+    setActiveSessionId(null);
+    setMessages([]);
   }
 
   function handleStop() {
@@ -191,7 +251,7 @@ export default function ChatPage() {
         <button className={`icon-btn ${rightOpen?'active':''}`} onClick={()=>setRightOpen(!rightOpen)} title="Toggle preview"><Icon.PanelRight/></button>
         <button className="icon-btn"><Icon.Settings/></button>
         <div className="w-[1px] h-5 bg-line mx-1"/>
-        <div className="flex items-center justify-center w-[30px] h-[30px] rounded-full bg-gradient-to-br from-accent to-accent-ink text-white font-bold text-[12px] tracking-tight">JR</div>
+        <div className="flex items-center justify-center w-[30px] h-[30px] rounded-full bg-gradient-to-br from-accent to-accent-ink text-white font-bold text-[12px] tracking-tight cursor-pointer" onClick={newChat} title="New Chat">JR</div>
       </div>
 
       <div className="app-body" data-left={leftOpen?'open':'closed'} data-right={rightOpen?'open':'closed'}>
@@ -230,16 +290,20 @@ export default function ChatPage() {
             </div>
 
             <div className="mt-6">
-              <div className="doc-list-label">
-                <Icon.History className="icon-sm inline mr-1.5 align-[-2px]"/>
-                Recent conversations
+              <div className="doc-list-label flex justify-between items-center">
+                <span>
+                  <Icon.History className="icon-sm inline mr-1.5 align-[-2px]"/>
+                  Recent conversations
+                </span>
+                <button className="icon-btn !w-[22px] !h-[22px]" onClick={newChat} title="New Chat"><Icon.Plus className="icon-sm"/></button>
               </div>
-              {HISTORY.map(h => (
-                <div key={h.id} className={`history-item ${h.active?'active':''}`}>
-                  <div className="font-medium whitespace-nowrap overflow-hidden text-ellipsis">{h.t}</div>
-                  <div className="text-[11.5px] text-muted">{h.d}</div>
+              {sessions.map(h => (
+                <div key={h.id} className={`history-item ${activeSessionId === h.id ? 'active' : ''}`} onClick={() => loadSession(h.id)}>
+                  <div className="font-medium whitespace-nowrap overflow-hidden text-ellipsis">{h.title}</div>
+                  <div className="text-[11.5px] text-muted">{h.date}</div>
                 </div>
               ))}
+              {sessions.length === 0 && <div className="text-[12px] text-muted text-center p-4 mt-2">No recent chats</div>}
             </div>
           </div>
         </aside>
