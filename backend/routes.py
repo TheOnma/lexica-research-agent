@@ -1,14 +1,17 @@
 """FastAPI routes for the document Q&A service."""
 
 import logging
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from rag.ingestion.loader import SUPPORTED_EXTENSIONS
-from rag.pipelines.rag import answer, ingest_document
+from rag.pipelines.rag import answer, answer_stream, ingest_document
+from rag.tasks import process_document_task, process_paper_task
 from rag.pipelines.research import discover, ingest_paper, summarize_recent_work
 from rag.retrieval.retriever import collection_count, delete_source, list_sources
 from rag.sources.base import Paper
@@ -39,7 +42,9 @@ class QuestionResponse(BaseModel):
 
 class IngestResponse(BaseModel):
     filename: str
-    chunks_stored: int
+    task_id: str | None = None
+    chunks_stored: int | None = None
+    status: str | None = None
 
 
 class StatusResponse(BaseModel):
@@ -81,14 +86,19 @@ async def ingest(file: UploadFile):
     try:
         content = await file.read()
         tmp_path.write_bytes(content)
-        chunks_stored = ingest_document(tmp_path)
+        
+        # Dispatch the background task to Celery
+        task = process_document_task.delay(str(tmp_path))
+        
+        # We DO NOT unlink tmp_path here, because the background worker needs to read it!
+        # The worker will delete it when it finishes.
     except Exception as e:
         logger.error("Ingestion failed for %s: %s", file.filename, e)
+        if tmp_path.exists():
+            tmp_path.unlink()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
-    return {"filename": file.filename, "chunks_stored": chunks_stored}
+    return {"filename": file.filename, "task_id": task.id, "status": "Processing"}
 
 
 @app.post("/ask", response_model=QuestionResponse)
@@ -104,6 +114,24 @@ def ask(request: QuestionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     return result
+
+
+@app.post("/ask_stream")
+def ask_stream(request: QuestionRequest):
+    """Answer a question using the ingested documents, streaming the response."""
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    def event_generator():
+        try:
+            for chunk in answer_stream(request.question):
+                # Format exactly as Server-Sent Events (SSE): "data: {...}\n\n"
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception as e:
+            logger.error("Streaming Answer generation failed: %s", e)
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # --- Research endpoints ---
@@ -147,10 +175,11 @@ def research_summarize(request: SummarizeRequest):
 
 @app.post("/research/ingest")
 def research_ingest(request: IngestPaperRequest):
-    """Pull a discovered paper into the library so /ask can use it."""
+    """Pull a discovered paper into the library so /ask can use it (Async)."""
     try:
-        paper = Paper(**request.paper)
-        return ingest_paper(paper)
+        # Dispatch the paper ingestion to Celery background worker
+        task = process_paper_task.delay(request.paper)
+        return {"title": request.paper.get("title"), "task_id": task.id, "status": "Processing"}
     except Exception as e:
         logger.error("Paper ingestion failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
