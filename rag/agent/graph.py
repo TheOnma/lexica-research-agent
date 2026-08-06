@@ -6,7 +6,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_anthropic import ChatAnthropic
 
 from rag.config import settings
-from rag.agent.tools import search_local_library, search_arxiv_for_papers
+from rag.agent.tools import search_local_library, search_arxiv_for_papers, ingest_arxiv_paper
 
 # 1. Define the State
 # The state is simply a list of messages (user inputs, AI responses, and tool results).
@@ -15,7 +15,7 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
 # 2. Initialize the Tools and the LLM
-tools = [search_local_library, search_arxiv_for_papers]
+tools = [search_local_library, search_arxiv_for_papers, ingest_arxiv_paper]
 llm = ChatAnthropic(
     model_name=settings.llm_model, 
     temperature=0, 
