@@ -17,6 +17,8 @@ from rag.retrieval.retriever import collection_count, delete_source, list_source
 from rag.sources.base import Paper
 from rag.agent.graph import app as agent_app
 from langchain_core.messages import HumanMessage
+from celery.result import AsyncResult
+from rag.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,17 @@ async def ingest(file: UploadFile):
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"filename": file.filename, "task_id": task.id, "status": "Processing"}
+
+
+@app.get("/task/{task_id}")
+def get_task_status(task_id: str):
+    """Check the status of a Celery background task."""
+    result = AsyncResult(task_id, app=celery_app)
+    return {
+        "task_id": task_id,
+        "status": result.state,
+        "result": result.result if result.ready() else None
+    }
 
 
 @app.post("/ask", response_model=QuestionResponse)
@@ -212,3 +225,43 @@ def agent_chat(request: AgentChatRequest):
     except Exception as e:
         logger.error("Agent chat failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+@app.post("/agent/chat_stream")
+async def agent_chat_stream(request: AgentChatRequest):
+    """Stream chat with the ReAct agent."""
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    async def generate():
+        inputs = {"messages": [HumanMessage(content=request.message)]}
+        try:
+            async for event in agent_app.astream_events(inputs, version="v2", config={"recursion_limit": 5}):
+                kind = event["event"]
+                
+                if kind == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    if chunk.content:
+                        # Anthropic can return content as a list of dicts sometimes for tool calls, 
+                        # but text chunks are strings or have string content.
+                        if isinstance(chunk.content, str):
+                            yield f"data: {json.dumps({'type': 'text', 'content': chunk.content})}\n\n"
+                        elif isinstance(chunk.content, list):
+                            for item in chunk.content:
+                                if isinstance(item, dict) and item.get("type") == "text":
+                                    yield f"data: {json.dumps({'type': 'text', 'content': item['text']})}\n\n"
+                
+                elif kind == "on_tool_start":
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': event['name'], 'input': event['data'].get('input')})}\n\n"
+                    
+                elif kind == "on_tool_end":
+                    # Tool output is generally a string from our tools
+                    output = event['data'].get('output')
+                    if hasattr(output, "content"):
+                        output = output.content
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name'], 'output': output})}\n\n"
+                    
+        except Exception as e:
+            logger.error("Agent stream failed: %s", e)
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
