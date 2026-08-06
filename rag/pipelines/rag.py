@@ -164,7 +164,7 @@ def answer_stream(question: str) -> Iterator[dict]:
 
     # Yield sources first so the UI can display them immediately
     sources = [
-        {"source": c["metadata"]["source"], "page": c["metadata"]["page"], "score": round(c["score"], 3)}
+        {"source": c["metadata"]["source"], "page": c["metadata"]["page"], "score": round(c["score"], 3), "text": c["text"]}
         for c in retrieved
     ]
     yield {"type": "sources", "data": sources}
