@@ -15,6 +15,8 @@ from rag.tasks import process_document_task, process_paper_task
 from rag.pipelines.research import discover, ingest_paper, summarize_recent_work
 from rag.retrieval.retriever import collection_count, delete_source, list_sources
 from rag.sources.base import Paper
+from rag.agent.graph import app as agent_app
+from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
 
@@ -182,4 +184,31 @@ def research_ingest(request: IngestPaperRequest):
         return {"title": request.paper.get("title"), "task_id": task.id, "status": "Processing"}
     except Exception as e:
         logger.error("Paper ingestion failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# --- Agent endpoints ---
+
+class AgentChatRequest(BaseModel):
+    message: str
+
+@app.post("/agent/chat")
+def agent_chat(request: AgentChatRequest):
+    """Chat with the ReAct agent, which can autonomously use tools."""
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+        
+    try:
+        # We pass a HumanMessage into the graph state
+        inputs = {"messages": [HumanMessage(content=request.message)]}
+        
+        # Invoke runs the entire graph cycle until it reaches END
+        result = agent_app.invoke(inputs)
+        
+        # The result state contains the entire message history.
+        # We return the content of the very last message.
+        final_message = result["messages"][-1].content
+        return {"response": final_message}
+    except Exception as e:
+        logger.error("Agent chat failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
