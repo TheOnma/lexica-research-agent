@@ -3,11 +3,12 @@
 import logging
 from pathlib import Path
 
+from typing import Iterator
 from rag.config import settings
 from rag.ingestion.chunker import chunk_pages
 from rag.ingestion.embedder import embed_chunks, embed_texts
 from rag.ingestion.loader import load_document, load_documents_from_dir, load_pdf, load_pdfs_from_dir
-from rag.llm import complete
+from rag.llm import complete, complete_stream
 from rag.retrieval.retriever import add_chunks, retrieve
 from langsmith import traceable
 
@@ -133,3 +134,51 @@ def answer(question: str) -> dict:
         ],
         "context_found": True,
     }
+
+
+@traceable
+def answer_stream(question: str) -> Iterator[dict]:
+    """
+    Answer a question using retrieved document context, yielding the response incrementally.
+
+    Yields:
+        {"type": "sources", "data": list[dict]}
+        {"type": "text", "data": str}
+    """
+    logger.info("Query (Stream): %s", question)
+
+    # 1. HyDE: embed a hypothetical answer rather than the raw question
+    hypothetical = _generate_hypothetical_answer(question)
+    query_embedding = embed_texts([hypothetical])[0]
+
+    # 2. Retrieve relevant chunks
+    retrieved = retrieve(query_embedding, query_text=question)
+
+    if not retrieved:
+        logger.warning("No relevant context found for query")
+        yield {
+            "type": "error",
+            "data": "I don't have enough information in the provided documents to answer that."
+        }
+        return
+
+    # Yield sources first so the UI can display them immediately
+    sources = [
+        {"source": c["metadata"]["source"], "page": c["metadata"]["page"], "score": round(c["score"], 3)}
+        for c in retrieved
+    ]
+    yield {"type": "sources", "data": sources}
+
+    # 3. Build context block with citations
+    context_lines = []
+    for i, chunk in enumerate(retrieved, 1):
+        meta = chunk["metadata"]
+        context_lines.append(
+            f"[{i}] Source: {meta['source']}, Page {meta['page']}\n{chunk['text']}"
+        )
+    context = "\n\n---\n\n".join(context_lines)
+
+    # 4. Generate answer with Claude and yield chunks
+    prompt = RAG_PROMPT_TEMPLATE.format(context=context, question=question)
+    for text_chunk in complete_stream(prompt, system=SYSTEM_PROMPT, model=settings.llm_model, max_tokens=1024):
+        yield {"type": "text", "data": text_chunk}
