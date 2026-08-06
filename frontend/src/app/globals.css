@@ -180,7 +180,7 @@ body {
   .history-item.active { @apply bg-surface-2; }
 
   /* Chat Col */
-  .chat-col { @apply flex flex-col min-w-0 bg-bg; }
+  .chat-col { @apply flex flex-col min-w-0 min-h-0 bg-bg; }
   .chat-scroll { @apply flex-1 overflow-y-auto; }
   .chat-inner { @apply max-w-[760px] mx-auto px-8 pt-10 pb-6 flex flex-col gap-9; }
 
