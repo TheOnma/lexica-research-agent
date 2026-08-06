@@ -114,6 +114,9 @@ def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | No
         deduplicated by (source, page), sorted by RRF score descending
     """
     collection = _get_collection()
+    if collection.count() == 0:
+        return []
+    
     k = top_k or settings.top_k
     n_candidates = min(k * 3, collection.count())
 
@@ -173,13 +176,32 @@ def collection_count() -> int:
     return _get_collection().count()
 
 
-def list_sources() -> list[str]:
-    """Return a sorted list of unique source document names in the collection."""
+def list_sources() -> list[dict]:
+    """Return a sorted list of unique source document names with page and chunk counts."""
     collection = _get_collection()
     if collection.count() == 0:
         return []
     result = collection.get(include=["metadatas"])
-    return sorted({m["source"] for m in result["metadatas"] if m.get("source")})
+    
+    docs = {}
+    for m in result["metadatas"]:
+        source = m.get("source")
+        if not source:
+            continue
+        page = m.get("page", 1)
+        if source not in docs:
+            docs[source] = {"name": source, "chunks": 0, "pages": set()}
+        docs[source]["chunks"] += 1
+        docs[source]["pages"].add(page)
+        
+    final_docs = []
+    for source in sorted(docs.keys()):
+        final_docs.append({
+            "name": source,
+            "chunks": docs[source]["chunks"],
+            "pages": len(docs[source]["pages"])
+        })
+    return final_docs
 
 
 def delete_source(source: str) -> int:
