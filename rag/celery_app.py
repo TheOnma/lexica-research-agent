@@ -21,4 +21,6 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    # Ensure the worker knows about our tasks without any extra flags.
+    imports=["rag.tasks"],
 )
