@@ -1,4 +1,6 @@
-const API_URL = "http://127.0.0.1:8000";
+// Point the browser at the API. Override with NEXT_PUBLIC_API_URL when the
+// frontend runs elsewhere (e.g. inside docker-compose).
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export interface Document {
   name: string;
@@ -100,15 +102,15 @@ export async function streamChat(
         }
       }
     }
-  } catch (err: any) {
-    onError(err.message);
+  } catch (err) {
+    onError(err instanceof Error ? err.message : String(err));
   }
 }
 
 export async function streamAgentChat(
   message: string,
-  onToolStart: (tool: string, input: any) => void,
-  onToolEnd: (tool: string, output: any) => void,
+  onToolStart: (tool: string, input: unknown) => void,
+  onToolEnd: (tool: string, output: unknown) => void,
   onChunk: (chunk: string) => void,
   onError: (err: string) => void,
   signal?: AbortSignal
@@ -160,11 +162,11 @@ export async function streamAgentChat(
         }
       }
     }
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
       onError("Stream stopped by user.");
     } else {
-      onError(err.message);
+      onError(err instanceof Error ? err.message : String(err));
     }
   }
 }
