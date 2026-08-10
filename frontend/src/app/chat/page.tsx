@@ -3,13 +3,21 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/icons";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Document, Citation, fetchDocuments, uploadDocument, pollTask, streamAgentChat } from "@/lib/api";
 
 interface ToolAction {
   name: string;
-  input: any;
+  input: unknown;
   output?: string;
   status: 'running' | 'done';
+}
+
+interface ArxivPaper {
+  title: string;
+  authors: string;
+  year: number;
+  abstract: string;
 }
 
 interface Message {
@@ -26,12 +34,6 @@ interface ChatSession {
   date: string;
   messages: Message[];
 }
-
-const SUGGESTED = [
-  "Summarise the key findings",
-  "Compare encoder and decoder stacks",
-  "What are the limitations mentioned?",
-];
 
 export default function ChatPage() {
   const [leftOpen, setLeftOpen] = useState(true);
@@ -55,9 +57,14 @@ export default function ChatPage() {
     const saved = localStorage.getItem('lexica_sessions');
     if (saved) {
       try {
+        // localStorage only exists in the browser; reading it must happen after
+        // mount or the server/client state would diverge.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSessions(JSON.parse(saved));
-      } catch(e) {}
+      } catch {}
     }
+    // loadDocuments is intentionally run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -144,16 +151,18 @@ export default function ChatPage() {
         const t = currentTools.find(x => x.name === tool && x.status === 'running');
         if (t) {
           t.status = 'done';
-          t.output = output;
+          // Tool output arrives over SSE as a string (JSON for structured results).
+          const outputStr = typeof output === "string" ? output : JSON.stringify(output);
+          t.output = outputStr;
           
           // Parse specific tool outputs
           if (tool === 'search_local_library') {
             try {
-              const parsed = JSON.parse(output);
+              const parsed = JSON.parse(outputStr);
               if (parsed.sources) {
                 currentSources = [...currentSources, ...parsed.sources];
               }
-            } catch (e) {}
+            } catch {}
           }
         }
         setMessages(prev => {
@@ -249,6 +258,7 @@ export default function ChatPage() {
         </div>
         <button className={`icon-btn ${leftOpen?'active':''}`} onClick={()=>setLeftOpen(!leftOpen)} title="Toggle documents (⌘\)"><Icon.Sidebar/></button>
         <button className={`icon-btn ${rightOpen?'active':''}`} onClick={()=>setRightOpen(!rightOpen)} title="Toggle preview"><Icon.PanelRight/></button>
+        <ThemeToggle />
         <button className="icon-btn"><Icon.Settings/></button>
         <div className="w-[1px] h-5 bg-line mx-1"/>
         <div className="flex items-center justify-center w-[30px] h-[30px] rounded-full bg-gradient-to-br from-accent to-accent-ink text-white font-bold text-[12px] tracking-tight cursor-pointer" onClick={newChat} title="New Chat">JR</div>
@@ -340,12 +350,12 @@ export default function ChatPage() {
                       if (t.name === 'search_local_library') uiLabel = "Searching your local workspace...";
                       if (t.name === 'ingest_arxiv_paper') uiLabel = `Downloading and ingesting paper...`;
 
-                      let arxivPapers = [];
+                      let arxivPapers: ArxivPaper[] = [];
                       if (t.name === 'search_arxiv_for_papers' && t.output) {
                         try {
                           const p = JSON.parse(t.output);
                           arxivPapers = p.papers || [];
-                        } catch(e) {}
+                        } catch {}
                       }
 
                       return (
@@ -358,7 +368,7 @@ export default function ChatPage() {
                           {arxivPapers.length > 0 && (
                             <div className="mt-2 flex flex-col gap-2">
                               <div className="font-semibold text-[11px] uppercase tracking-wider text-muted">Found Papers</div>
-                              {arxivPapers.map((paper: any, pidx: number) => (
+                              {arxivPapers.map((paper, pidx) => (
                                 <div key={pidx} className="bg-white border border-line-2 rounded p-2 shadow-sm">
                                   <div className="font-semibold text-accent">{paper.title}</div>
                                   <div className="text-[11.5px] text-muted">{paper.authors} · {paper.year}</div>
