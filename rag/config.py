@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     chroma_persist_dir: str = "./data/chroma"
     collection_name: str = "documents"
 
+    # Where uploaded files are staged before the Celery worker ingests them.
+    # The API process writes here and the worker reads from here, so in Docker
+    # both containers must share this directory (see docker-compose.yml).
+    upload_dir: str = "/tmp/uploads"
+
     # RAG settings
     chunk_size: int = 512
     chunk_overlap: int = 64
