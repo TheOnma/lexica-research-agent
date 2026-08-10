@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    env:
+      # rag.config.Settings requires these at import time; dummy values are fine
+      # because the CI tests mock all external calls.
+      ANTHROPIC_API_KEY: sk-ant-test
+      OPENAI_API_KEY: sk-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run mocked unit tests
+        # tests/test_integration.py hits real OpenAI/network — run only the
+        # mocked research tests in CI (see README "Running tests").
+        run: pytest tests/test_research.py -v
+
+  frontend:
+    name: Frontend (tsc + eslint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: pnpm lint
