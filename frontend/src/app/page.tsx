@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Icon } from "@/components/ui/icons";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Landing() {
   return (
@@ -18,9 +19,12 @@ export default function Landing() {
             <a href="#how" className="px-3 py-2 font-medium text-[14px] text-ink-2 no-underline rounded-lg hover:bg-surface-2 hover:text-ink">How it works</a>
           </div>
           <div className="flex-1"></div>
-          <Link className="btn btn-primary btn-sm" href="/chat">
-            Open app <Icon.ArrowRight className="icon-sm" />
-          </Link>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Link className="btn btn-primary btn-sm" href="/chat">
+              Open app <Icon.ArrowRight className="icon-sm" />
+            </Link>
+          </div>
         </div>
       </nav>
 
@@ -76,11 +80,11 @@ export default function Landing() {
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-[11px] font-bold"><Icon.Sparkle className="w-4 h-4"/></div>
                     <div className="flex-1 bg-surface p-3 rounded-xl rounded-tl-none border border-line text-[13.5px] leading-[1.6]">
-                      I couldn't find direct papers on Q-Star, but here are related topics you could search for:
+                      I couldn&apos;t find direct papers on Q-Star, but here are related topics you could search for:
                       <ol className="mt-2 pl-4 space-y-1">
                         <li>Process Reward Models (PRMs)</li>
                         <li>Monte Carlo Tree Search (MCTS) + LLMs</li>
-                        <li>Let's Verify Step by Step</li>
+                        <li>Let&apos;s Verify Step by Step</li>
                       </ol>
                     </div>
                   </div>
