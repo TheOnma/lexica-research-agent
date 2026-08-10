@@ -1,6 +1,8 @@
 """ChromaDB vector store with hybrid BM25 + dense retrieval and RRF merging."""
 
+import gc
 import logging
+from pathlib import Path
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -12,15 +14,73 @@ logger = logging.getLogger(__name__)
 
 _client: chromadb.ClientAPI | None = None
 _collection: chromadb.Collection | None = None
+_last_store_mtime: float = 0.0
 
 # In-memory BM25 corpus — rebuilt from ChromaDB on first use or after ingestion
 _bm25_corpus: list[tuple[str, str, dict]] = []  # (id, text, metadata)
 _bm25_index: BM25Okapi | None = None
 
 
+def _store_mtime() -> float:
+    """
+    Latest mtime across the ChromaDB sqlite store and its WAL file (or 0.0).
+
+    The Celery worker writes from another process; in WAL mode those writes land
+    in chroma.sqlite3-wal before being checkpointed into chroma.sqlite3, so the
+    main db's mtime alone can miss worker writes. Watching both files makes the
+    staleness check in _get_collection reliable.
+    """
+    base = Path(settings.chroma_persist_dir)
+    best = 0.0
+    for name in ("chroma.sqlite3", "chroma.sqlite3-wal"):
+        try:
+            best = max(best, (base / name).stat().st_mtime)
+        except OSError:
+            pass
+    return best
+
+
+def _reset_handle() -> None:
+    """
+    Close and drop the cached ChromaDB client/collection and BM25 corpus.
+
+    The old client MUST be released before opening a new one: chromadb's rust
+    backend keeps per-process segment state, and a second PersistentClient
+    created while the first is still alive fails vector queries with
+    "Error creating hnsw segment reader: Nothing found on disk". We close it
+    explicitly, drop all references, and run a GC pass to flush any cycles.
+    """
+    global _client, _collection, _last_store_mtime, _bm25_corpus, _bm25_index
+    client = _client
+    _client = None
+    _collection = None
+    if client is not None:
+        try:
+            client.close()
+        except Exception:
+            logger.debug("Error closing ChromaDB client", exc_info=True)
+    del client
+    gc.collect()
+    _last_store_mtime = 0.0
+    _bm25_corpus = []
+    _bm25_index = None
+
+
 def _get_collection() -> chromadb.Collection:
-    global _client, _collection
-    if _collection is None:
+    """
+    Return the ChromaDB collection, reopening it when the store changed on disk.
+
+    Ingestion runs in a separate Celery worker process, so the API process must
+    not keep a long-lived handle: ChromaDB caches collection->segment metadata
+    in-process, and a stale handle fails vector queries with "Error creating
+    hnsw segment reader: Nothing found on disk". Comparing the sqlite file mtime
+    detects worker writes cheaply (one stat per call); reopening also reloads the
+    BM25 corpus so keyword search sees newly ingested documents too.
+    """
+    global _client, _collection, _last_store_mtime, _bm25_corpus, _bm25_index
+    mtime = _store_mtime()
+    if _collection is None or mtime != _last_store_mtime:
+        _reset_handle()
         _client = chromadb.PersistentClient(
             path=settings.chroma_persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
@@ -29,6 +89,9 @@ def _get_collection() -> chromadb.Collection:
             name=settings.collection_name,
             metadata={"hnsw:space": "cosine"},
         )
+        # Re-stat after creation so the recorded baseline is the file we actually created.
+        _last_store_mtime = _store_mtime()
+        logger.debug("Opened ChromaDB collection (mtime %s)", _last_store_mtime)
     return _collection
 
 
@@ -121,11 +184,26 @@ def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | No
     n_candidates = min(k * 3, collection.count())
 
     # --- Dense retrieval ---
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=n_candidates,
-        include=["documents", "metadatas", "distances"],
-    )
+    try:
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n_candidates,
+            include=["documents", "metadatas", "distances"],
+        )
+    except Exception:
+        # Defensive: the worker can rewrite HNSW segments between our open and
+        # this query (e.g. a WAL checkpoint race that slips past the mtime check).
+        # Drop the local reference BEFORE reopening — _reset_handle closes the
+        # old client, and chroma fails if two clients are alive at once.
+        logger.warning("Dense query failed; reopening ChromaDB and retrying once", exc_info=True)
+        del collection
+        _reset_handle()
+        collection = _get_collection()
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n_candidates,
+            include=["documents", "metadatas", "distances"],
+        )
 
     RRF_K = 60
     dense_items: dict[str, dict] = {}
