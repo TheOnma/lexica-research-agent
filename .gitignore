@@ -8,12 +8,18 @@ __pycache__/
 .DS_Store
 data/chroma/
 data/documents/
+data/uploads/
 *.pdf
 !tests/fixtures/*.pdf
 evals/results.json
 .venv/
 venv/
 
-# Frontend (React / Vite)
+# Frontend (Next.js)
 frontend/node_modules/
-frontend/dist/
+frontend/.next/
+frontend/out/
+*.tsbuildinfo
+
+# Freebuff desktop app state
+.freebuff/
