@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from rag.config import settings
 from rag.ingestion.loader import SUPPORTED_EXTENSIONS
 from rag.pipelines.rag import answer, answer_stream, ingest_document
 from rag.tasks import process_document_task, process_paper_task
@@ -80,20 +81,23 @@ def delete_document(filename: str):
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest(file: UploadFile):
     """Upload and ingest a document (PDF, DOCX, or TXT)."""
-    from pathlib import Path as _Path
-    ext = _Path(file.filename or "").suffix.lower()
+    ext = Path(file.filename or "").suffix.lower()
     if not file.filename or ext not in SUPPORTED_EXTENSIONS:
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         raise HTTPException(status_code=400, detail=f"Unsupported file type. Supported: {supported}")
 
-    tmp_path = Path(f"/tmp/{file.filename}")
+    # Stage the file where the Celery worker can reach it (shared volume in Docker).
+    # We use only the basename to prevent path traversal from a malicious filename.
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = upload_dir / Path(file.filename).name
     try:
         content = await file.read()
         tmp_path.write_bytes(content)
-        
+
         # Dispatch the background task to Celery
         task = process_document_task.delay(str(tmp_path))
-        
+
         # We DO NOT unlink tmp_path here, because the background worker needs to read it!
         # The worker will delete it when it finishes.
     except Exception as e:
