@@ -32,5 +32,20 @@ class Settings(BaseSettings):
     top_k: int = 5
     relevance_threshold: float = 0.3
 
+    # CRAG-style retrieval evaluation (Corrective RAG, arXiv:2401.15884)
+    # An LLM judge scores each retrieved chunk; on weak verdicts we reformulate
+    # the query and re-retrieve instead of generating from bad context.
+    relevance_eval_enabled: bool = True
+    relevance_eval_max_rounds: int = 2        # original + one reformulation round
+    relevance_threshold_correct: float = 0.6  # score >= this -> verdict "correct"
+    relevance_threshold_ambiguous: float = 0.3  # score >= this -> "ambiguous", else "incorrect"
+
+    # SimRAG-style self-evaluation (POST /selfimprove/run, arXiv:2410.17952)
+    # The model writes questions its own library should answer, then we measure
+    # how often retrieval surfaces the ground-truth chunk (hit rate).
+    selfeval_num_samples: int = 5
+    selfeval_top_k: int = 3
+    selfeval_questions_per_chunk: int = 3
+
 
 settings = Settings()
