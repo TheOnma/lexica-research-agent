@@ -2,6 +2,7 @@
 
 import gc
 import logging
+import random
 from pathlib import Path
 
 import chromadb
@@ -131,6 +132,30 @@ def _retrieve_bm25(query: str, n: int) -> list[tuple[str, str, dict]]:
     ]
 
 
+def chunk_id(metadata: dict) -> str:
+    """Stable chunk id used across ingest / retrieve / self-evaluation.
+
+    Must match the ids written by add_chunks() so a retrieved chunk can be
+    compared against a known ground-truth chunk by id.
+    """
+    return f"{metadata['source']}_p{metadata['page']}_c{metadata.get('chunk', 0)}"
+
+
+def random_chunks(n: int) -> list[dict]:
+    """Sample n random chunks (id, text, metadata) — used by the SimRAG-style
+    self-evaluation loop to pick ground-truth passages from the library."""
+    collection = _get_collection()
+    if collection.count() == 0:
+        return []
+    result = collection.get(include=["documents", "metadatas"])
+    triples = list(zip(result["ids"], result["documents"], result["metadatas"]))
+    k = min(n, len(triples))
+    return [
+        {"id": id_, "text": text, "metadata": meta}
+        for id_, text, meta in random.sample(triples, k)
+    ]
+
+
 def add_chunks(chunks: list[dict]) -> None:
     """
     Store embedded chunks in ChromaDB and extend the BM25 corpus.
@@ -213,7 +238,7 @@ def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | No
         score = 1.0 - dist
         if score < settings.relevance_threshold:
             continue
-        id_ = f"{meta['source']}_p{meta['page']}_c{meta.get('chunk', 0)}"
+        id_ = chunk_id(meta)
         dense_items[id_] = {"text": text, "metadata": meta, "dense_score": score, "dense_rank": rank}
 
     # --- BM25 retrieval ---
