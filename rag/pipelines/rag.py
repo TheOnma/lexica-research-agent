@@ -9,6 +9,7 @@ from rag.ingestion.chunker import chunk_pages
 from rag.ingestion.embedder import embed_chunks, embed_texts
 from rag.ingestion.loader import load_document, load_documents_from_dir, load_pdf, load_pdfs_from_dir
 from rag.llm import complete, complete_stream
+from rag.retrieval.relevance import corrective_retrieve
 from rag.retrieval.retriever import add_chunks, retrieve
 from langsmith import traceable
 
@@ -48,6 +49,17 @@ def _generate_hypothetical_answer(question: str) -> str:
     )
     logger.info("HyDE passage (first 120 chars): %s", hypothetical[:120])
     return hypothetical
+
+
+def _retrieve_hybrid(question: str, top_k: int | None = None) -> list[dict]:
+    """HyDE -> embed -> hybrid retrieve for one question.
+
+    Shared by the plain path and the CRAG corrective loop (each reformulated
+    query goes through its own HyDE pass so the new wording drives retrieval).
+    """
+    hypothetical = _generate_hypothetical_answer(question)
+    query_embedding = embed_texts([hypothetical])[0]
+    return retrieve(query_embedding, query_text=question, top_k=top_k)
 
 
 @traceable
@@ -97,12 +109,15 @@ def answer(question: str) -> dict:
     """
     logger.info("Query: %s", question)
 
-    # 1. HyDE: embed a hypothetical answer rather than the raw question
-    hypothetical = _generate_hypothetical_answer(question)
-    query_embedding = embed_texts([hypothetical])[0]
-
-    # 2. Retrieve relevant chunks (hybrid dense + BM25, keyed on original question)
-    retrieved = retrieve(query_embedding, query_text=question)
+    # 1+2. Retrieve relevant chunks (hybrid dense + BM25). When relevance
+    # evaluation is enabled, the CRAG corrective loop judges the chunks and
+    # reformulates + re-retrieves if the first pass missed.
+    if settings.relevance_eval_enabled:
+        retrieved = corrective_retrieve(
+            question, _retrieve_hybrid, top_chunks=settings.top_k
+        )
+    else:
+        retrieved = _retrieve_hybrid(question)
 
     if not retrieved:
         logger.warning("No relevant context found for query")
@@ -147,12 +162,13 @@ def answer_stream(question: str) -> Iterator[dict]:
     """
     logger.info("Query (Stream): %s", question)
 
-    # 1. HyDE: embed a hypothetical answer rather than the raw question
-    hypothetical = _generate_hypothetical_answer(question)
-    query_embedding = embed_texts([hypothetical])[0]
-
-    # 2. Retrieve relevant chunks
-    retrieved = retrieve(query_embedding, query_text=question)
+    # 1+2. Retrieve relevant chunks (CRAG corrective loop when enabled)
+    if settings.relevance_eval_enabled:
+        retrieved = corrective_retrieve(
+            question, _retrieve_hybrid, top_chunks=settings.top_k
+        )
+    else:
+        retrieved = _retrieve_hybrid(question)
 
     if not retrieved:
         logger.warning("No relevant context found for query")
