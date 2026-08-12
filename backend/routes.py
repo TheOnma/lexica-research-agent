@@ -16,6 +16,7 @@ from rag.tasks import process_document_task, process_paper_task
 from rag.pipelines.research import discover, ingest_paper, summarize_recent_work
 from rag.retrieval.retriever import collection_count, delete_source, list_sources
 from rag.sources.base import Paper
+from rag.selfimprove import run_self_eval
 from rag.agent.graph import app as agent_app
 from langchain_core.messages import HumanMessage
 from celery.result import AsyncResult
@@ -98,8 +99,8 @@ async def ingest(file: UploadFile):
         # Dispatch the background task to Celery
         task = process_document_task.delay(str(tmp_path))
 
-        # We DO NOT unlink tmp_path here, because the background worker needs to read it!
-        # The worker will delete it when it finishes.
+        # NOTE: do NOT unlink tmp_path here — the background worker still needs to
+        # read it. The worker deletes it when it finishes.
     except Exception as e:
         logger.error("Ingestion failed for %s: %s", file.filename, e)
         if tmp_path.exists():
@@ -204,6 +205,33 @@ def research_ingest(request: IngestPaperRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+# --- Self-improvement (SimRAG-style) ---
+
+class SelfEvalRequest(BaseModel):
+    num_samples: int | None = None
+    top_k: int | None = None
+    questions_per_chunk: int | None = None
+
+
+@app.post("/selfimprove/run")
+def selfimprove_run(request: SelfEvalRequest):
+    """Run the SimRAG-style self-evaluation loop over the library.
+
+    The model generates questions from sampled chunks, we check how often
+    retrieval surfaces the exact source chunk (hit rate), and the report
+    includes the worst queries plus an LLM suggestion for what to change.
+    """
+    try:
+        return run_self_eval(
+            num_samples=request.num_samples,
+            top_k=request.top_k,
+            questions_per_chunk=request.questions_per_chunk,
+        )
+    except Exception as e:
+        logger.error("Self-eval failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 # --- Agent endpoints ---
 
 class AgentChatRequest(BaseModel):
@@ -220,7 +248,8 @@ def agent_chat(request: AgentChatRequest):
         inputs = {"messages": [HumanMessage(content=request.message)]}
         
         # Invoke runs the entire graph cycle until it reaches END
-        result = agent_app.invoke(inputs)
+        # Updated recursion limit to 50 from 5
+        result = agent_app.invoke(inputs, config={"recursion_limit": 50})
         
         # The result state contains the entire message history.
         # We return the content of the very last message.
@@ -239,7 +268,7 @@ async def agent_chat_stream(request: AgentChatRequest):
     async def generate():
         inputs = {"messages": [HumanMessage(content=request.message)]}
         try:
-            async for event in agent_app.astream_events(inputs, version="v2", config={"recursion_limit": 5}):
+            async for event in agent_app.astream_events(inputs, version="v2", config={"recursion_limit": 50}):
                 kind = event["event"]
                 
                 if kind == "on_chat_model_stream":
