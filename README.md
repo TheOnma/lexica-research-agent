@@ -15,7 +15,11 @@ A local-first research copilot: upload your own documents and ask grounded, cite
 - **Multi-format upload** — PDF, Word (.docx), and plain text (.txt), ingested asynchronously via a Celery worker
 - **Hybrid retrieval** — dense vector search (OpenAI embeddings) + BM25 keyword search, merged with Reciprocal Rank Fusion (RRF)
 - **HyDE** — a hypothetical answer is generated and embedded before retrieval to close the vocabulary gap between question and document
+- **CRAG corrective retrieval** — an LLM judge scores every retrieved chunk (correct/ambiguous/incorrect, per arXiv:2401.15884); on weak verdicts the query is reformulated and retrieval re-run instead of generating from bad context (`relevance_eval_enabled`)
 - **Citation grounding** — the model answers only from retrieved context; below the answer, every source links back to document + page + extracted text
+
+**Self-improvement**
+- **SimRAG-style self-evaluation** — the model generates questions its own library should answer, then measures how often retrieval surfaces the exact source chunk (hit rate), exposing worst queries and an LLM summary of the failure pattern (`POST /selfimprove/run`)
 
 **Paper discovery**
 - **arXiv + Semantic Scholar** search, cross-source de-duplication/merging, ranked by citation impact and recency
@@ -218,6 +222,7 @@ python main.py ask "What are the key findings?" --show-context
 | `POST` | `/research/ingest` | Add a discovered paper to the library (`{"paper": {...}}`) |
 | `POST` | `/agent/chat` | One-shot chat with the ReAct agent (`{"message": "..."}`) |
 | `POST` | `/agent/chat_stream` | Agent chat as SSE (`tool_start` / `tool_end` / `text` events) |
+| `POST` | `/selfimprove/run` | SimRAG self-eval: hit rate + worst queries + improvement suggestions (`{"num_samples": 5}`) |
 
 Interactive docs: http://localhost:8000/docs
 
