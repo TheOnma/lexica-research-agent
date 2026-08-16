@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 _BASE = "https://api.semanticscholar.org/graph/v1"
 _REC_BASE = "https://api.semanticscholar.org/recommendations/v1"
 _FIELDS = "title,abstract,year,authors,externalIds,citationCount,url,openAccessPdf"
-_TIMEOUT = 20.0
+# S2 is a best-effort secondary source: fail fast (8s) rather than let a dead
+# upstream hold the agent's tool round hostage for 20s. arXiv results are primary.
+_TIMEOUT = 8.0
 
 
 def _headers() -> dict:
