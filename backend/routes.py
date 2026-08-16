@@ -18,7 +18,7 @@ from rag.retrieval.retriever import collection_count, delete_source, list_source
 from rag.sources.base import Paper
 from rag.selfimprove import run_self_eval
 from rag.agent.graph import app as agent_app
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from celery.result import AsyncResult
 from rag.celery_app import celery_app
 
@@ -236,6 +236,41 @@ def selfimprove_run(request: SelfEvalRequest):
 
 class AgentChatRequest(BaseModel):
     message: str
+    # Tier-0 conversation memory: prior turns as [{role: "user"|"assistant", content}].
+    # Optional so existing clients sending only {message} keep working.
+    history: list[dict] = []
+
+
+# Cap on how much prior conversation we replay into the graph state. Bounding
+# this is the same instinct as the soft tool budget (rag/agent/graph.py): memory
+# that grows unbounded becomes a cost and latency tax on every request.
+MAX_HISTORY_MESSAGES = 20
+
+
+def build_agent_inputs(message: str, history: list[dict] | None = None) -> dict:
+    """Build the graph state from the new message plus prior conversation turns.
+
+    Only human/assistant text is replayed. Tool events are display-only in the
+    UI, and reconstructing LangChain ToolMessages without exact tool_call_ids is
+    fragile; the assistant's text already summarizes what it found (e.g. the
+    numbered paper list), which is what references like "the first and second"
+    resolve against. Unknown roles and empty/non-string content are skipped so a
+    buggy or malicious client can't crash state seeding.
+    """
+    msgs = []
+    for turn in (history or [])[-MAX_HISTORY_MESSAGES:]:
+        role = turn.get("role")
+        content = turn.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        if role == "assistant":
+            msgs.append(AIMessage(content=content))
+        elif role == "user":
+            msgs.append(HumanMessage(content=content))
+        # unknown roles: skip
+    msgs.append(HumanMessage(content=message))
+    return {"messages": msgs}
+
 
 @app.post("/agent/chat")
 def agent_chat(request: AgentChatRequest):
@@ -244,8 +279,8 @@ def agent_chat(request: AgentChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
         
     try:
-        # We pass a HumanMessage into the graph state
-        inputs = {"messages": [HumanMessage(content=request.message)]}
+        # Seed the graph state with prior turns + the new message (Tier-0 memory)
+        inputs = build_agent_inputs(request.message, request.history)
         
         # Invoke runs the entire graph cycle until it reaches END
         # Updated recursion limit to 50 from 5
@@ -266,7 +301,8 @@ async def agent_chat_stream(request: AgentChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     async def generate():
-        inputs = {"messages": [HumanMessage(content=request.message)]}
+        # Seed the graph state with prior turns + the new message (Tier-0 memory)
+        inputs = build_agent_inputs(request.message, request.history)
         try:
             async for event in agent_app.astream_events(inputs, version="v2", config={"recursion_limit": 50}):
                 kind = event["event"]

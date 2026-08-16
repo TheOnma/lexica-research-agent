@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Document, Citation, fetchDocuments, uploadDocument, pollTask, streamAgentChat } from "@/lib/api";
+import { Document, Citation, ChatHistoryEntry, fetchDocuments, uploadDocument, pollTask, streamAgentChat } from "@/lib/api";
 
 interface ToolAction {
   name: string;
@@ -135,8 +135,16 @@ export default function ChatPage() {
     let currentTools: ToolAction[] = [];
     let currentSources: Citation[] = [];
 
+    // Tier-0 conversation memory: replay prior turns so the agent can refer to
+    // things it said earlier (e.g. "save the first and second"). Text only —
+    // tool cards are display state, and the backend caps the length.
+    const history: ChatHistoryEntry[] = messages
+      .filter(m => m.text && m.text.trim().length > 0)
+      .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
+
     await streamAgentChat(
       question,
+      history,
       (tool, input) => {
         currentTools = [...currentTools, { name: tool, input, status: 'running' }];
         setMessages(prev => {

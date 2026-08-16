@@ -1,6 +1,9 @@
 # Secrets
 .env
 
+# Private interview-prep notes (do not commit)
+INTERVIEW_NOTES.md
+
 # Python
 __pycache__/
 *.pyc

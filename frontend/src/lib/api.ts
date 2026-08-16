@@ -15,6 +15,11 @@ export interface Citation {
   text: string;
 }
 
+export interface ChatHistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export async function fetchDocuments(): Promise<Document[]> {
   const res = await fetch(`${API_URL}/documents`);
   if (!res.ok) throw new Error("Failed to fetch documents");
@@ -109,6 +114,7 @@ export async function streamChat(
 
 export async function streamAgentChat(
   message: string,
+  history: ChatHistoryEntry[],
   onToolStart: (tool: string, input: unknown) => void,
   onToolEnd: (tool: string, output: unknown) => void,
   onChunk: (chunk: string) => void,
@@ -119,7 +125,7 @@ export async function streamAgentChat(
     const res = await fetch(`${API_URL}/agent/chat_stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, history }),
       signal
     });
     

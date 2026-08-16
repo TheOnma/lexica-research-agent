@@ -24,8 +24,9 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run mocked unit tests
         # tests/test_integration.py hits real OpenAI/network — run only the
-        # mocked research tests in CI (see README "Running tests").
-        run: pytest tests/test_research.py -v
+        # mocked tests in CI (research pipeline + agent memory) (see README
+        # "Running tests").
+        run: pytest tests/test_research.py tests/test_agent_memory.py tests/test_arxiv_download.py -v
 
   frontend:
     name: Frontend (tsc + eslint)
