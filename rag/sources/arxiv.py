@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 import arxiv
+import requests
 
 from rag.sources.base import Paper
 
@@ -69,13 +70,29 @@ def fetch_by_id(arxiv_id: str) -> Paper:
 
 
 def download_pdf(paper: Paper) -> Path:
-    """Download a paper's PDF to a temp file and return the path."""
-    if not paper.pdf_url:
-        raise ValueError(f"Paper {paper.id} has no PDF url")
-    arxiv_id = paper.external_ids.get("ArXiv") or paper.id
-    result = next(_client.results(arxiv.Search(id_list=[arxiv_id])))
+    """Download a paper's PDF to a temp file and return the path.
+
+    arXiv >= 4.0 removed the library's PDF-download helpers entirely
+    (Result.download_pdf never existed on the Result object, and the module-
+    level helper was dropped), so we fetch the PDF directly from the URL the
+    API provides. Plain HTTP also makes this immune to future arxiv API churn
+    — the version pin is `arxiv>=2.1.0`, so a fresh clone may resolve any 2.x.
+    """
+    pdf_url = paper.pdf_url
+    if not pdf_url:
+        arxiv_id = paper.external_ids.get("ArXiv") or paper.id
+        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
     tmp_dir = Path(tempfile.mkdtemp(prefix="arxiv_"))
-    filename = f"{arxiv_id.replace('/', '_')}.pdf"
-    path = Path(result.download_pdf(dirpath=str(tmp_dir), filename=filename))
-    logger.info("Downloaded %s -> %s", arxiv_id, path)
+    filename = f"{paper.id.replace('/', '_')}.pdf"
+    path = tmp_dir / filename
+    resp = requests.get(
+        pdf_url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (research-agent; +https://github.com/TheOnma/research-agent)"
+        },
+        timeout=60,
+    )
+    resp.raise_for_status()
+    path.write_bytes(resp.content)
+    logger.info("Downloaded %s -> %s", paper.id, path)
     return path
