@@ -21,7 +21,7 @@ export default function Landing() {
           <div className="flex-1"></div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <Link className="btn btn-primary btn-sm" href="/chat">
+            <Link className="btn btn-primary btn-sm" href="/search">
               Open app <Icon.ArrowRight className="icon-sm" />
             </Link>
           </div>
@@ -45,7 +45,7 @@ export default function Landing() {
                 Lexica discovers recent papers across arXiv and Semantic Scholar, reads your local library, and synthesizes answers you can cite. Built for researchers and students who refuse to guess.
               </p>
               <div className="flex items-center gap-3 mt-8">
-                <Link className="btn btn-primary" href="/chat">
+                <Link className="btn btn-primary" href="/search">
                   Open Workspace <Icon.ArrowRight className="icon-sm" />
                 </Link>
                 <a className="btn btn-ghost" href="#how">See how it works</a>
@@ -174,7 +174,7 @@ export default function Landing() {
           <div className="text-center flex flex-col items-center">
             <h2 className="text-[clamp(36px,5vw,60px)] leading-[1.05] font-semibold tracking-[-0.03em]">Stop hunting for the right page.<br /><em className="font-display italic font-normal text-accent-ink">Just ask.</em></h2>
             <p className="mt-6 text-[19px] text-muted">Initialize the workspace and run the agent locally.</p>
-            <Link className="btn btn-primary mt-8" href="/chat">
+            <Link className="btn btn-primary mt-8" href="/search">
               Open Workspace <Icon.ArrowRight className="icon-sm" />
             </Link>
           </div>

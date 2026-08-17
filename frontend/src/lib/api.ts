@@ -8,6 +8,16 @@ export interface Document {
   pages: number;
 }
 
+export interface DocumentPage {
+  page: number;
+  text: string;
+}
+
+export interface DocumentText {
+  source: string;
+  pages: DocumentPage[];
+}
+
 export interface Citation {
   source: string;
   page: number;
@@ -25,6 +35,23 @@ export async function fetchDocuments(): Promise<Document[]> {
   if (!res.ok) throw new Error("Failed to fetch documents");
   const data = await res.json();
   return data.documents;
+}
+
+export async function deleteDocument(name: string): Promise<number> {
+  // Query param (not path) — source names are paper titles that can contain slashes.
+  const res = await fetch(`${API_URL}/documents?name=${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Delete failed");
+  const data = await res.json();
+  return data.chunks_deleted ?? 0;
+}
+
+export async function fetchDocumentText(name: string): Promise<DocumentText> {
+  // Query param (not path) — source names are paper titles that can contain slashes.
+  const res = await fetch(`${API_URL}/documents/text?name=${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error("Failed to fetch document text");
+  return res.json();
 }
 
 export async function uploadDocument(file: File): Promise<string> {
@@ -58,6 +85,7 @@ export async function pollTask(taskId: string): Promise<boolean> {
 
 export async function streamChat(
   question: string,
+  source: string | undefined,
   onSources: (sources: Citation[]) => void,
   onChunk: (chunk: string) => void,
   onError: (err: string) => void
@@ -66,7 +94,7 @@ export async function streamChat(
     const res = await fetch(`${API_URL}/ask_stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question })
+      body: JSON.stringify({ question, source })
     });
     
     if (!res.ok) {
@@ -110,6 +138,19 @@ export async function streamChat(
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err));
   }
+}
+
+export async function ingestArxiv(arxivId: string): Promise<string> {
+  // One-click save from a search-result card: fetch by ID server-side and queue
+  // ingestion — no need for the client to reconstruct the full paper dict.
+  const res = await fetch(`${API_URL}/research/ingest_arxiv`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ arxiv_id: arxivId }),
+  });
+  if (!res.ok) throw new Error("Save failed");
+  const data = await res.json();
+  return data.task_id;
 }
 
 export async function streamAgentChat(

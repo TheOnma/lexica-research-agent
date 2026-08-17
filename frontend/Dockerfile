@@ -5,7 +5,8 @@ WORKDIR /app
 # Enable pnpm pinned in package.json via corepack
 RUN corepack enable && corepack prepare pnpm@10.18.2 --activate
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# .npmrc sets aggressive fetch retries — container networking is flaky on some hosts.
 RUN pnpm install --frozen-lockfile
 
 COPY . .

@@ -133,10 +133,30 @@ body {
   }
   .app-body {
     @apply flex-1 grid min-h-0 transition-[grid-template-columns] duration-300 ease-in-out;
-    grid-template-columns: var(--left, 280px) 1fr var(--right, 360px);
+    grid-template-columns: var(--left, 280px) 6px 1fr 6px var(--right, 360px);
   }
+  .app-body.resizing { @apply transition-none; }
   .app-body[data-left="closed"] { --left: 0px; }
   .app-body[data-right="closed"] { --right: 0px; }
+
+  /* Drag-to-resize dividers between the three columns */
+  .resizer {
+    @apply cursor-col-resize relative select-none;
+    background: transparent;
+  }
+  .resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    right: 2px;
+    border-radius: 2px;
+    transition: background .15s;
+  }
+  .resizer:hover::after, .resizer.dragging::after {
+    background: var(--accent);
+  }
   
   .panel {
     @apply bg-surface border-r border-line-2 overflow-hidden flex flex-col;
@@ -163,9 +183,20 @@ body {
   }
   .doc:hover { @apply bg-surface-2; }
   .doc.active { @apply bg-accent-soft text-accent-ink; }
+
+  /* Per-document delete button: hidden until the row is hovered, red when armed */
+  .doc-del {
+    @apply w-6 h-6 shrink-0 rounded-md grid place-items-center text-muted opacity-0 transition-all border-none cursor-pointer;
+    background: transparent;
+  }
+  .doc:hover .doc-del, .doc-del.armed, .doc-del.busy { @apply opacity-100; }
+  .doc-del:hover { @apply text-red-500 bg-red-500/10; }
+  .doc-del.armed { @apply text-red-500 bg-red-500/15; }
+  .doc-del.armed:hover { @apply bg-red-500/25; }
+  .doc-del.busy { @apply cursor-wait; }
   
   .ftype {
-    @apply w-7 h-8 rounded bg-surface-2 border border-line grid place-items-center font-mono font-semibold text-[9px] leading-none text-muted shrink-0;
+    @apply w-7 h-8 rounded bg-surface-2 border border-line grid place-items-center font-mono font-semibold text-[9px] leading-none text-muted shrink-0 overflow-hidden whitespace-nowrap;
   }
   .doc.active .ftype {
     @apply bg-surface border-accent/30;
@@ -194,6 +225,31 @@ body {
   .msg.bot .text { @apply text-[15.5px] leading-[1.65] text-ink-2; }
   .msg.bot .text p { @apply m-0 mb-3; }
   .msg.bot .text p:last-child { @apply mb-0; }
+  /* Rendered markdown (react-markdown) typography */
+  .msg.bot .text h1, .msg.bot .text h2, .msg.bot .text h3, .msg.bot .text h4 {
+    @apply font-semibold text-ink mt-5 mb-2 leading-snug tracking-[-0.01em];
+  }
+  .msg.bot .text h1 { @apply text-[19px]; }
+  .msg.bot .text h2 { @apply text-[17px]; }
+  .msg.bot .text h3 { @apply text-[15.5px]; }
+  .msg.bot .text h4 { @apply text-[14.5px]; }
+  .msg.bot .text h1:first-child, .msg.bot .text h2:first-child, .msg.bot .text h3:first-child { @apply mt-0; }
+  .msg.bot .text ul, .msg.bot .text ol { @apply m-0 mb-3 pl-5; }
+  .msg.bot .text ul { @apply list-disc; }
+  .msg.bot .text ol { @apply list-decimal; }
+  .msg.bot .text li { @apply mb-1; }
+  .msg.bot .text li > p { @apply m-0; }
+  .msg.bot .text strong { @apply font-semibold text-ink; }
+  .msg.bot .text em { @apply italic; }
+  .msg.bot .text a { @apply text-accent underline underline-offset-2 decoration-accent/40 hover:decoration-accent; }
+  .msg.bot .text code { @apply font-mono text-[13px] bg-surface-2 border border-line rounded px-1 py-0.5; }
+  .msg.bot .text pre { @apply m-0 mb-3 p-3 rounded-lg bg-surface-2 border border-line overflow-x-auto; }
+  .msg.bot .text pre code { @apply bg-transparent border-0 p-0; }
+  .msg.bot .text blockquote { @apply m-0 mb-3 pl-3 border-l-2 border-line text-muted; }
+  .msg.bot .text table { @apply w-full m-0 mb-3 text-[13.5px] border-collapse; }
+  .msg.bot .text th, .msg.bot .text td { @apply border border-line px-2.5 py-1.5 text-left align-top; }
+  .msg.bot .text th { @apply bg-surface-2 font-semibold text-ink; }
+  .msg.bot .text hr { @apply my-4 border-line; }
   
   .cite {
     @apply inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 mx-[1px] rounded-[5px] bg-accent-soft text-accent-ink font-mono font-semibold text-[10.5px] leading-none cursor-pointer transition-colors align-[1px] border border-accent/25;
@@ -219,4 +275,54 @@ body {
   }
   .pdf-page .hl { @apply bg-[#eef1ff] px-0.5 rounded-sm; }
   .pdf-page .hl-strong { @apply bg-[#dde3ff] px-0.5 rounded-sm shadow-[0_0_0_2px_#dde3ff66]; }
+
+  /* Library surface: sidebar + reader + ask-about-this-paper */
+  .lib-body { @apply flex-1 grid min-h-0 grid-cols-[280px_1fr] bg-bg; }
+  .lib-main { @apply flex flex-col min-w-0 min-h-0 bg-bg; }
+  .lib-empty { @apply flex-1 flex flex-col items-center justify-center text-center px-8; }
+
+  .reader-head {
+    @apply h-[52px] shrink-0 px-4 border-b border-line-2 bg-surface flex items-center gap-3;
+  }
+  .reader-scroll {
+    @apply flex-1 overflow-y-auto bg-surface-2 p-4 flex flex-col gap-4;
+  }
+  .reader-page { @apply scroll-mt-3; }
+  .reader-page.highlighted > div {
+    @apply border-accent shadow-[0_0_0_3px_var(--color-accent-soft)];
+  }
+
+  /* Scoped Q&A thread (ask about this paper) */
+  .qa-thread {
+    @apply max-h-[240px] overflow-y-auto border-b border-line-2 bg-bg px-4 py-3 flex flex-col gap-3;
+  }
+  .qa-msg { @apply flex flex-col gap-1; }
+  .qa-label {
+    @apply font-mono font-medium text-[11px] leading-none text-muted tracking-[0.04em] uppercase;
+  }
+  .qa-msg.bot .qa-label { @apply text-accent-ink; }
+  .qa-msg.bot > div:nth-child(2) { @apply text-[13.5px] leading-relaxed text-ink-2; }
+  .qa-msg.bot p { @apply m-0 mb-2; }
+  .qa-msg.bot p:last-child { @apply mb-0; }
+  .qa-msg.bot strong { @apply font-semibold text-ink; }
+  .qa-msg.bot ul, .qa-msg.bot ol { @apply m-0 mb-2 pl-5; }
+  .qa-msg.bot ul { @apply list-disc; }
+  .qa-msg.bot ol { @apply list-decimal; }
+  .qa-msg.user > div:nth-child(2) { @apply text-[14px] text-ink font-medium; }
+
+  .qa-sources { @apply flex gap-1.5 mt-1.5 flex-wrap; }
+  .qa-src {
+    @apply h-6 px-2 rounded-md bg-surface border border-line text-[11.5px] font-mono font-medium text-muted cursor-pointer transition-colors;
+  }
+  .qa-src:hover { @apply border-accent text-accent-ink bg-accent-soft; }
+  .qa-src.active { @apply border-accent bg-accent text-white; }
+
+  .qa-composer { @apply shrink-0 border-t border-line-2 bg-bg px-4 py-3; }
+  .qa-composer-box {
+    @apply flex items-end gap-2 max-w-[860px] mx-auto bg-surface border border-line rounded-xl px-3 py-2.5 shadow-[var(--shadow)];
+  }
+  .qa-composer-box:focus-within { @apply border-accent shadow-[0_0_0_4px_var(--color-accent-soft)]; }
+  .qa-composer-hint {
+    @apply text-[11.5px] text-muted text-center mt-1.5;
+  }
 }
