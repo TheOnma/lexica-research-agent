@@ -26,7 +26,7 @@ jobs:
         # tests/test_integration.py hits real OpenAI/network — run only the
         # mocked tests in CI (research pipeline + agent memory) (see README
         # "Running tests").
-        run: pytest tests/test_research.py tests/test_agent_memory.py tests/test_arxiv_download.py -v
+        run: pytest tests/test_research.py tests/test_agent_memory.py tests/test_arxiv_download.py tests/test_library.py -v
 
   frontend:
     name: Frontend (tsc + eslint)
