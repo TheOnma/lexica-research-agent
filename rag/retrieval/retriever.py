@@ -10,6 +10,7 @@ from chromadb.config import Settings as ChromaSettings
 from rank_bm25 import BM25Okapi
 
 from rag.config import settings
+from rag.ingestion.library import delete_source_pages
 
 logger = logging.getLogger(__name__)
 
@@ -118,17 +119,23 @@ def _get_bm25() -> BM25Okapi:
     return _bm25_index
 
 
-def _retrieve_bm25(query: str, n: int) -> list[tuple[str, str, dict]]:
-    """Return top n (id, text, metadata) tuples by BM25 keyword score."""
+def _retrieve_bm25(query: str, n: int, source: str | None = None) -> list[tuple[str, str, dict]]:
+    """Return top n (id, text, metadata) tuples by BM25 keyword score.
+
+    When source is given, only chunks of that document are scored — used by the
+    "ask about this paper" flow so a question can't leak context from other docs.
+    """
     if not _bm25_corpus and _get_collection().count() == 0:
         return []
     bm25 = _get_bm25()
     scores = bm25.get_scores(query.lower().split())
-    top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:n]
+    indices = [i for i in range(len(scores)) if scores[i] > 0]
+    if source is not None:
+        indices = [i for i in indices if _bm25_corpus[i][2].get("source") == source]
+    top_indices = sorted(indices, key=lambda i: scores[i], reverse=True)[:n]
     return [
         (_bm25_corpus[i][0], _bm25_corpus[i][1], _bm25_corpus[i][2])
         for i in top_indices
-        if scores[i] > 0
     ]
 
 
@@ -184,7 +191,7 @@ def add_chunks(chunks: list[dict]) -> None:
     logger.info("Upserted %d chunks into collection '%s'", len(chunks), settings.collection_name)
 
 
-def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | None = None) -> list[dict]:
+def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | None = None, source: str | None = None) -> list[dict]:
     """
     Hybrid retrieval: dense cosine similarity + BM25 keyword search, merged with RRF.
 
@@ -196,6 +203,8 @@ def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | No
         query_embedding — embedded query vector (ideally a HyDE hypothetical passage)
         query_text      — original query text used for BM25 keyword search
         top_k           — number of results (defaults to settings.top_k)
+        source          — restrict retrieval to a single document (exact match on
+                          the source metadata field); used by "ask about this paper"
 
     Returns:
         list of {"text": str, "metadata": dict, "score": float}
@@ -204,9 +213,12 @@ def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | No
     collection = _get_collection()
     if collection.count() == 0:
         return []
-    
+
     k = top_k or settings.top_k
     n_candidates = min(k * 3, collection.count())
+
+    # Restrict dense search to one document when scoped (Chroma where filter).
+    query_where = {"source": source} if source is not None else None
 
     # --- Dense retrieval ---
     try:
@@ -214,6 +226,7 @@ def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | No
             query_embeddings=[query_embedding],
             n_results=n_candidates,
             include=["documents", "metadatas", "distances"],
+            where=query_where,
         )
     except Exception:
         # Defensive: the worker can rewrite HNSW segments between our open and
@@ -228,6 +241,7 @@ def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | No
             query_embeddings=[query_embedding],
             n_results=n_candidates,
             include=["documents", "metadatas", "distances"],
+            where=query_where,
         )
 
     RRF_K = 60
@@ -244,7 +258,7 @@ def retrieve(query_embedding: list[float], query_text: str = "", top_k: int | No
     # --- BM25 retrieval ---
     bm25_items: dict[str, dict] = {}
     if query_text:
-        for bm25_rank, (id_, text, meta) in enumerate(_retrieve_bm25(query_text, n_candidates)):
+        for bm25_rank, (id_, text, meta) in enumerate(_retrieve_bm25(query_text, n_candidates, source)):
             bm25_items[id_] = {"text": text, "metadata": meta, "bm25_rank": bm25_rank}
 
     # --- RRF merge ---
@@ -324,4 +338,5 @@ def delete_source(source: str) -> int:
                         if meta.get("source") != source]
         _bm25_index = None
         logger.info("Deleted %d chunks for source '%s'", len(ids), source)
+    delete_source_pages(source)
     return len(ids)

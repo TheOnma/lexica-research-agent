@@ -7,6 +7,7 @@ from typing import Iterator
 from rag.config import settings
 from rag.ingestion.chunker import chunk_pages
 from rag.ingestion.embedder import embed_chunks, embed_texts
+from rag.ingestion.library import save_source_pages
 from rag.ingestion.loader import load_document, load_documents_from_dir, load_pdf, load_pdfs_from_dir
 from rag.llm import complete, complete_stream
 from rag.retrieval.relevance import corrective_retrieve
@@ -51,15 +52,17 @@ def _generate_hypothetical_answer(question: str) -> str:
     return hypothetical
 
 
-def _retrieve_hybrid(question: str, top_k: int | None = None) -> list[dict]:
+def _retrieve_hybrid(question: str, top_k: int | None = None, source: str | None = None) -> list[dict]:
     """HyDE -> embed -> hybrid retrieve for one question.
 
     Shared by the plain path and the CRAG corrective loop (each reformulated
     query goes through its own HyDE pass so the new wording drives retrieval).
+    When source is set, retrieval is restricted to that one document (the
+    "ask about this paper" flow).
     """
     hypothetical = _generate_hypothetical_answer(question)
     query_embedding = embed_texts([hypothetical])[0]
-    return retrieve(query_embedding, query_text=question, top_k=top_k)
+    return retrieve(query_embedding, query_text=question, top_k=top_k, source=source)
 
 
 @traceable
@@ -72,6 +75,8 @@ def ingest_document(path: str | Path) -> int:
     """
     logger.info("Ingesting %s", path)
     pages = load_document(path)
+    # Keep the extracted text so users can read the source in full (see library.py).
+    save_source_pages(Path(path).name, pages)
     chunks = chunk_pages(pages)
     chunks = embed_chunks(chunks)
     add_chunks(chunks)
@@ -93,12 +98,13 @@ def ingest_directory(directory: str | Path) -> int:
 
 
 @traceable
-def answer(question: str) -> dict:
+def answer(question: str, source: str | None = None) -> dict:
     """
     Answer a question using retrieved document context.
 
     Args:
         question — natural language question
+        source   — restrict retrieval to a single document (optional)
 
     Returns:
         {
@@ -114,10 +120,10 @@ def answer(question: str) -> dict:
     # reformulates + re-retrieves if the first pass missed.
     if settings.relevance_eval_enabled:
         retrieved = corrective_retrieve(
-            question, _retrieve_hybrid, top_chunks=settings.top_k
+            question, lambda q: _retrieve_hybrid(q, source=source), top_chunks=settings.top_k
         )
     else:
-        retrieved = _retrieve_hybrid(question)
+        retrieved = _retrieve_hybrid(question, source=source)
 
     if not retrieved:
         logger.warning("No relevant context found for query")
@@ -152,7 +158,7 @@ def answer(question: str) -> dict:
 
 
 @traceable
-def answer_stream(question: str) -> Iterator[dict]:
+def answer_stream(question: str, source: str | None = None) -> Iterator[dict]:
     """
     Answer a question using retrieved document context, yielding the response incrementally.
 
@@ -165,10 +171,10 @@ def answer_stream(question: str) -> Iterator[dict]:
     # 1+2. Retrieve relevant chunks (CRAG corrective loop when enabled)
     if settings.relevance_eval_enabled:
         retrieved = corrective_retrieve(
-            question, _retrieve_hybrid, top_chunks=settings.top_k
+            question, lambda q: _retrieve_hybrid(q, source=source), top_chunks=settings.top_k
         )
     else:
-        retrieved = _retrieve_hybrid(question)
+        retrieved = _retrieve_hybrid(question, source=source)
 
     if not retrieved:
         logger.warning("No relevant context found for query")

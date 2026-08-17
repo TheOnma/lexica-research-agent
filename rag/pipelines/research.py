@@ -10,6 +10,7 @@ import re
 from rag.config import settings
 from rag.ingestion.chunker import chunk_pages
 from rag.ingestion.embedder import embed_chunks
+from rag.ingestion.library import save_source_pages
 from rag.ingestion.loader import load_document
 from rag.llm import complete
 from rag.retrieval.retriever import add_chunks
@@ -103,6 +104,11 @@ def ingest_paper(paper: Paper) -> dict:
     label = _paper_label(paper)
     for page in pages:
         page["metadata"]["source"] = label
+
+    # Keep the extracted full text so users can read the paper (see library.py).
+    # Saved AFTER the source-label pass above: for PDFs the loader labels pages
+    # with the temp filename, which we must not persist.
+    save_source_pages(label, pages)
 
     chunks = chunk_pages(pages)
     chunks = embed_chunks(chunks)

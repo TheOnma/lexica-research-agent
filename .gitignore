@@ -12,6 +12,7 @@ __pycache__/
 data/chroma/
 data/documents/
 data/uploads/
+data/library/
 *.pdf
 !tests/fixtures/*.pdf
 evals/results.json

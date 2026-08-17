@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # both containers must share this directory (see docker-compose.yml).
     upload_dir: str = "/tmp/uploads"
 
+    # Extracted full text of every ingested source, one JSON file per document
+    # (pages keyed by number). The worker writes it at ingest time; the API
+    # serves it so users can read a source in full — not just the retrieved
+    # chunks. Must live on the shared volume like chroma/ and uploads/.
+    library_dir: str = "./data/library"
+
     # RAG settings
     chunk_size: int = 512
     chunk_overlap: int = 64

@@ -11,10 +11,12 @@ from pydantic import BaseModel
 
 from rag.config import settings
 from rag.ingestion.loader import SUPPORTED_EXTENSIONS
+from rag.ingestion.library import load_source_pages
 from rag.pipelines.rag import answer, answer_stream, ingest_document
 from rag.tasks import process_document_task, process_paper_task
 from rag.pipelines.research import discover, ingest_paper, summarize_recent_work
 from rag.retrieval.retriever import collection_count, delete_source, list_sources
+from rag.sources import arxiv
 from rag.sources.base import Paper
 from rag.selfimprove import run_self_eval
 from rag.agent.graph import app as agent_app
@@ -38,6 +40,9 @@ app.add_middleware(
 
 class QuestionRequest(BaseModel):
     question: str
+    # Optional: restrict retrieval to a single document (the "ask about this
+    # paper" flow in the Library). Backward compatible — omitted = whole corpus.
+    source: str | None = None
 
 
 class QuestionResponse(BaseModel):
@@ -74,9 +79,41 @@ def documents():
 
 @app.delete("/documents/{filename}")
 def delete_document(filename: str):
-    """Remove all chunks for the given document from the collection."""
-    count = delete_source(filename)
-    return {"filename": filename, "chunks_deleted": count}
+    """Remove all chunks for the given document (path-based; legacy form)."""
+    return _delete_source(filename)
+
+
+@app.delete("/documents")
+def delete_document_by_name(name: str):
+    """Remove all chunks for the given document.
+
+    Query-param variant: source names are paper titles that can contain
+    slashes, which a path segment cannot carry.
+    """
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="name cannot be empty")
+    return _delete_source(name)
+
+
+def _delete_source(name: str) -> dict:
+    """Shared delete logic: Chroma chunks + saved extracted text."""
+    count = delete_source(name)
+    return {"filename": name, "chunks_deleted": count}
+
+
+@app.get("/documents/text")
+def document_text(name: str):
+    """Return the saved full text (pages) of an ingested source for reading.
+
+    Query param (not a path segment) because source names are paper titles
+    that can contain slashes and other characters.
+    """
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="name cannot be empty")
+    data = load_source_pages(name)
+    if data is None:
+        raise HTTPException(status_code=404, detail="No saved text for this document")
+    return data
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -128,7 +165,7 @@ def ask(request: QuestionRequest):
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     try:
-        result = answer(request.question)
+        result = answer(request.question, source=request.source)
     except Exception as e:
         logger.error("Answer generation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -137,21 +174,26 @@ def ask(request: QuestionRequest):
 
 
 @app.post("/ask_stream")
+def _ask_stream_events(request: QuestionRequest):
+    """Stream answer events (sources / text / error) as SSE-formatted strings.
+
+    Extracted from the route so tests can iterate the generator directly.
+    """
+    try:
+        for chunk in answer_stream(request.question, source=request.source):
+            yield f"data: {json.dumps(chunk)}\n\n"
+    except Exception as e:
+        logger.error("Streaming Answer generation failed: %s", e)
+        yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+
+
+@app.post("/ask_stream")
 def ask_stream(request: QuestionRequest):
     """Answer a question using the ingested documents, streaming the response."""
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-    def event_generator():
-        try:
-            for chunk in answer_stream(request.question):
-                # Format exactly as Server-Sent Events (SSE): "data: {...}\n\n"
-                yield f"data: {json.dumps(chunk)}\n\n"
-        except Exception as e:
-            logger.error("Streaming Answer generation failed: %s", e)
-            yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(_ask_stream_events(request), media_type="text/event-stream")
 
 
 # --- Research endpoints ---
@@ -193,6 +235,10 @@ def research_summarize(request: SummarizeRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+class IngestArxivRequest(BaseModel):
+    arxiv_id: str
+
+
 @app.post("/research/ingest")
 def research_ingest(request: IngestPaperRequest):
     """Pull a discovered paper into the library so /ask can use it (Async)."""
@@ -202,6 +248,25 @@ def research_ingest(request: IngestPaperRequest):
         return {"title": request.paper.get("title"), "task_id": task.id, "status": "Processing"}
     except Exception as e:
         logger.error("Paper ingestion failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/research/ingest_arxiv")
+def research_ingest_arxiv(request: IngestArxivRequest):
+    """Fetch a paper by its exact arXiv ID and queue it for ingestion (Async).
+
+    The one-click "Save" on a search-result card needs only the ID the card
+    already carries — no need to reconstruct the full paper dict client-side
+    (authors are a list server-side, not the display string).
+    """
+    if not request.arxiv_id.strip():
+        raise HTTPException(status_code=400, detail="arxiv_id cannot be empty")
+    try:
+        paper = arxiv.fetch_by_id(request.arxiv_id.strip())
+        task = process_paper_task.delay(paper.to_dict())
+        return {"title": paper.title, "arxiv_id": request.arxiv_id, "task_id": task.id, "status": "Processing"}
+    except Exception as e:
+        logger.error("arXiv ingest failed for %s: %s", request.arxiv_id, e)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
