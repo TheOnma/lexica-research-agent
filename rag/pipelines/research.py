@@ -10,7 +10,7 @@ import re
 from rag.config import settings
 from rag.ingestion.chunker import chunk_pages
 from rag.ingestion.embedder import embed_chunks
-from rag.ingestion.library import save_source_pages
+from rag.ingestion.library import save_source_pages, save_source_pdf
 from rag.ingestion.loader import load_document
 from rag.llm import complete
 from rag.retrieval.retriever import add_chunks
@@ -109,6 +109,11 @@ def ingest_paper(paper: Paper) -> dict:
     # Saved AFTER the source-label pass above: for PDFs the loader labels pages
     # with the temp filename, which we must not persist.
     save_source_pages(label, pages)
+
+    # Archive the original PDF too — extracted text cannot preserve figures,
+    # math, or the two-column layout, so the reader renders the real PDF.
+    if paper.external_ids.get("ArXiv") and path.exists():
+        save_source_pdf(label, path.read_bytes())
 
     chunks = chunk_pages(pages)
     chunks = embed_chunks(chunks)
