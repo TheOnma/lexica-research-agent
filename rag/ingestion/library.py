@@ -5,6 +5,9 @@ discarded after ingest. This module keeps the extracted pages per source as a
 JSON file on the shared volume — the worker writes it at ingest time, and the
 API serves it through GET /documents/text so the UI can show a readable,
 page-numbered copy of any document in the library.
+
+It also archives the *original PDF* bytes per source. Extracted text cannot
+preserve figures, math, or two-column layout — rendering the real PDF does.
 """
 
 import json
@@ -73,5 +76,40 @@ def delete_source_pages(source: str) -> bool:
     if path.exists():
         path.unlink()
         logger.info("Deleted saved text for %r", source)
+        return True
+    return False
+
+
+# --- Original-PDF archival (render with full fidelity: figures, math, layout) ---
+
+def pdf_path(source: str) -> Path:
+    """Path to the archived original PDF for a source name."""
+    return Path(settings.library_dir) / f"{sanitize_source(source)}.pdf"
+
+
+def save_source_pdf(source: str, data: bytes) -> Path | None:
+    """Archive the original PDF for a source.
+
+    Extracted text (save_source_pages) is what retrieval searches; the PDF is
+    what users read — it preserves the paper's figures, math, and layout that
+    text extraction destroys. Returns the path written, or None when the
+    source or payload is empty.
+    """
+    if not source or not data:
+        logger.info("No PDF to archive for source %r", source)
+        return None
+    path = pdf_path(source)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    logger.info("Archived original PDF for %r -> %s (%d bytes)", source, path, len(data))
+    return path
+
+
+def delete_source_pdf(source: str) -> bool:
+    """Remove the archived PDF for a source. Returns True if one existed."""
+    path = pdf_path(source)
+    if path.exists():
+        path.unlink()
+        logger.info("Deleted archived PDF for %r", source)
         return True
     return False
