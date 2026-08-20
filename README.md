@@ -82,7 +82,11 @@ research-agent/
 │       ├── app/               # / (landing), /chat (workspace), layout, globals.css
 │       ├── components/        # ThemeProvider, ThemeToggle, ui/icons
 │       └── lib/api.ts         # Fetch wrappers for all API endpoints
-├── evals/                     # Q&A harness + research citation-grounding eval
+├── evals/                     # Evaluation suite
+│   ├── eval_dataset.json      # Golden Q&A pairs (keyword + page expectations)
+│   ├── run_evals.py           # Q&A harness: keyword match + context recall
+│   ├── eval_research.py       # Citation-grounding eval for research summaries
+│   └── eval_ragas.py          # RAGAS evaluation (faithfulness, precision, relevance)
 ├── tests/                     # Mocked unit tests (pytest) — no network required
 ├── main.py                    # CLI entry point (serve / ingest / ask)
 ├── Dockerfile                 # API + worker image
@@ -250,11 +254,26 @@ pnpm lint             # eslint
 
 **CI** — a GitHub Actions workflow (`.github/workflows/ci.yml`) runs the mocked pytest suite, `tsc --noEmit`, and `eslint` on every push/PR to `main`.
 
-**Evals** — `evals/` contains a Q&A harness and a citation-grounding eval for the research pipeline:
+**Evals** — `evals/` contains three evaluation scripts and a golden dataset:
+
+| File | What it measures | Requirements |
+|---|---|---|
+| `eval_dataset.json` | Golden Q&A pairs — each has a question, expected keywords, and an optional expected source page | — |
+| `run_evals.py` | **Keyword match** (any expected keyword appears in the answer) + **context recall** (expected page surfaces in retrieved sources) | Documents in the dataset must already be ingested into ChromaDB |
+| `eval_research.py` | **Citation grounding** — discovers papers for a topic, generates a summary, then verifies every `[i]` citation maps to a real reference (no hallucinated citations) | Network access + `ANTHROPIC_API_KEY` |
+| `eval_ragas.py` | **RAGAS metrics** — faithfulness, context precision, and answer relevance, scored by an LLM judge | `pip install ragas datasets`; needs both API keys |
 
 ```bash
-python evals/run_evals.py          # Q&A harness
-python evals/eval_research.py      # citation-grounding eval (needs keys)
+# Q&A harness (keyword match + context recall)
+python evals/run_evals.py
+python evals/run_evals.py --dataset evals/eval_dataset.json --output evals/results.json
+
+# Citation-grounding eval (needs network + keys)
+python evals/eval_research.py
+python evals/eval_research.py --topics "rag" "graph neural networks" --limit 6
+
+# RAGAS evaluation (needs ragas + datasets packages + both API keys)
+python evals/eval_ragas.py
 ```
 
 ---
